@@ -4,9 +4,11 @@ import java.math.BigDecimal
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
@@ -125,5 +127,32 @@ class OrderCase1ServiceTest {
         assertFailsWith<IllegalArgumentException> {
             service.createOrder(memberId = 101L, items = listOf(1L to 0))
         }
+    }
+
+    @Test
+    fun `상태 이력은 동시 변경과 조회에서도 예외 없이 안전하게 조회된다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        val service = OrderCase1Service(catalog)
+        val order = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+
+        val errorRef = AtomicReference<Throwable?>(null)
+        val executor = Executors.newFixedThreadPool(8)
+        val statuses = listOf(OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELED)
+
+        repeat(300) { index ->
+            executor.submit {
+                runCatching {
+                    service.changeStatus(order.id, statuses[index % statuses.size], actorId = index.toLong())
+                    service.findStatusHistories(order.id)
+                }.onFailure { errorRef.compareAndSet(null, it) }
+            }
+        }
+
+        executor.shutdown()
+        val finished = executor.awaitTermination(5, TimeUnit.SECONDS)
+
+        assertTrue(finished)
+        assertNull(errorRef.get())
     }
 }

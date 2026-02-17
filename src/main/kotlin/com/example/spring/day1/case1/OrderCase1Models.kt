@@ -3,6 +3,7 @@ package com.example.spring.day1.case1
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 
 enum class OrderStatus {
@@ -64,7 +65,7 @@ class OrderCase1Service(
 ) {
     private val orderSequence = AtomicLong(0)
     private val orders = ConcurrentHashMap<Long, Order>()
-    private val statusHistories = mutableListOf<OrderStatusHistory>()
+    private val statusHistories = CopyOnWriteArrayList<OrderStatusHistory>()
 
     // 내부 저장 상태를 외부 변경으로부터 보호하기 위한 방어적 복사.
     private fun toExternalOrder(order: Order): Order = order.copy(items = order.items.toList())
