@@ -6,6 +6,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class OrderCase1ServiceTest {
@@ -58,4 +59,64 @@ class OrderCase1ServiceTest {
         assertEquals(200, ids.size)
         assertEquals(200, orderNos.size)
     }
+
+    @Test
+    fun `사례1과 사례2 통합 - 상태 변경 시 이력이 누적된다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+
+        val service = OrderCase1Service(catalog)
+        val order = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+
+        val paidChanged = service.changeStatus(order.id, OrderStatus.PAID, actorId = 1001L)
+        val shippedChanged = service.changeStatus(order.id, OrderStatus.SHIPPED, actorId = 1002L)
+
+        assertTrue(paidChanged)
+        assertTrue(shippedChanged)
+        assertEquals(OrderStatus.SHIPPED, service.findOrder(order.id).status)
+
+        val histories = service.findStatusHistories(order.id)
+        assertEquals(2, histories.size)
+        assertEquals(OrderStatus.CREATED, histories[0].fromStatus)
+        assertEquals(OrderStatus.PAID, histories[0].toStatus)
+        assertEquals(1001L, histories[0].changedBy)
+        assertEquals(OrderStatus.PAID, histories[1].fromStatus)
+        assertEquals(OrderStatus.SHIPPED, histories[1].toStatus)
+        assertEquals(1002L, histories[1].changedBy)
+    }
+
+    @Test
+    fun `사례1과 사례2 통합 - 동일 상태 변경 요청은 no-op 처리된다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+
+        val service = OrderCase1Service(catalog)
+        val order = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+        service.changeStatus(order.id, OrderStatus.PAID, actorId = 1001L)
+
+        val changed = service.changeStatus(order.id, OrderStatus.PAID, actorId = 1002L)
+
+        assertFalse(changed)
+        assertEquals(OrderStatus.PAID, service.findOrder(order.id).status)
+        assertEquals(1, service.findStatusHistories(order.id).size)
+    }
 }
+
+    // [코드리뷰 반영] 외부에서 반환받은 Order를 수정해도 내부 저장 상태/이력은 훼손되지 않아야 한다.
+    @Test
+    fun `반환된 Order 수정은 내부 상태에 영향을 주지 않는다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+
+        val service = OrderCase1Service(catalog)
+        val returnedOrder = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+
+        // 외부에서 상태를 임의 변경(잘못된 사용)
+        returnedOrder.status = OrderStatus.CANCELED
+
+        // 내부 저장 상태는 보호되어야 함
+        val internalOrder = service.findOrder(returnedOrder.id)
+        assertEquals(OrderStatus.CREATED, internalOrder.status)
+        assertEquals(0, service.findStatusHistories(returnedOrder.id).size)
+    }
+

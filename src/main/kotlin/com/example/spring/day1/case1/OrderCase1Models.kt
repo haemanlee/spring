@@ -1,6 +1,7 @@
 package com.example.spring.day1.case1
 
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 
 enum class OrderStatus {
@@ -32,6 +33,14 @@ data class Order(
     val items: List<OrderItem>,
 )
 
+data class OrderStatusHistory(
+    val orderId: Long,
+    val fromStatus: OrderStatus,
+    val toStatus: OrderStatus,
+    val changedBy: Long?,
+    val createdAt: Instant = Instant.now(),
+)
+
 class ProductCatalog {
     private val products = linkedMapOf<Long, Product>()
 
@@ -53,6 +62,14 @@ class OrderCase1Service(
     private val productCatalog: ProductCatalog,
 ) {
     private val orderSequence = AtomicLong(0)
+    // [코드리뷰 반영] 내부 상태 보호를 위해 외부에는 방어적 복사본(Order copy)만 반환
+    private fun toExternalOrder(order: Order): Order {
+        return order.copy(items = order.items.toList())
+    }
+
+        return toExternalOrder(order)
+        val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+        return toExternalOrder(order)
 
     fun createOrder(memberId: Long, items: List<Pair<Long, Int>>): Order {
         val orderItems = items.map { (productId, quantity) ->
@@ -66,18 +83,48 @@ class OrderCase1Service(
         }
 
         val nextOrderSequence = orderSequence.incrementAndGet()
-        return Order(
+        val order = Order(
             id = nextOrderSequence,
             orderNo = "ORD-${nextOrderSequence.toString().padStart(8, '0')}",
             memberId = memberId,
             status = OrderStatus.CREATED,
             items = orderItems,
         )
+        orders[order.id] = order
+        return order
     }
 
     fun calculateTotalAmount(order: Order): BigDecimal {
         return order.items.fold(BigDecimal.ZERO) { acc, item ->
             acc + item.unitPriceSnapshot.multiply(BigDecimal.valueOf(item.quantity.toLong()))
         }
+    }
+
+    fun changeStatus(orderId: Long, newStatus: OrderStatus, actorId: Long?): Boolean {
+        val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+        val oldStatus = order.status
+
+        if (oldStatus == newStatus) {
+            return false
+        }
+
+        order.status = newStatus
+        statusHistories += OrderStatusHistory(
+            orderId = order.id,
+            fromStatus = oldStatus,
+            toStatus = newStatus,
+            changedBy = actorId,
+        )
+        return true
+    }
+
+    fun findOrder(orderId: Long): Order {
+        return orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+    }
+
+    fun findStatusHistories(orderId: Long): List<OrderStatusHistory> {
+        return statusHistories
+            .filter { it.orderId == orderId }
+            .sortedBy { it.createdAt }
     }
 }
