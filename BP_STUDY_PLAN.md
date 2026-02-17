@@ -1,5 +1,7 @@
 # 실무 BP 중심 학습 계획 (주문 / 정산 / 게시판)
 
+> Day 1 상세 노트: `docs/DAY1_ORDER_THEORY_CASES.md`
+
 > 전제: **Spring Boot + Kotlin + Spring Data JPA + MySQL/PostgreSQL**
 
 ## 전체 학습 로드맵 (3~4주)
