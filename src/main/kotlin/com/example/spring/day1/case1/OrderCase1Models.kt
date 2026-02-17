@@ -62,8 +62,14 @@ class OrderCase1Service(
     private val productCatalog: ProductCatalog,
 ) {
     private val orderSequence = AtomicLong(0)
-    private val orders = linkedMapOf<Long, Order>()
-    private val statusHistories = mutableListOf<OrderStatusHistory>()
+    // [코드리뷰 반영] 내부 상태 보호를 위해 외부에는 방어적 복사본(Order copy)만 반환
+    private fun toExternalOrder(order: Order): Order {
+        return order.copy(items = order.items.toList())
+    }
+
+        return toExternalOrder(order)
+        val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+        return toExternalOrder(order)
 
     fun createOrder(memberId: Long, items: List<Pair<Long, Int>>): Order {
         val orderItems = items.map { (productId, quantity) ->

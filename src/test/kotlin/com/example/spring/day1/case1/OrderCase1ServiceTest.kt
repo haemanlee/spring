@@ -101,3 +101,22 @@ class OrderCase1ServiceTest {
         assertEquals(1, service.findStatusHistories(order.id).size)
     }
 }
+
+    // [코드리뷰 반영] 외부에서 반환받은 Order를 수정해도 내부 저장 상태/이력은 훼손되지 않아야 한다.
+    @Test
+    fun `반환된 Order 수정은 내부 상태에 영향을 주지 않는다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+
+        val service = OrderCase1Service(catalog)
+        val returnedOrder = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+
+        // 외부에서 상태를 임의 변경(잘못된 사용)
+        returnedOrder.status = OrderStatus.CANCELED
+
+        // 내부 저장 상태는 보호되어야 함
+        val internalOrder = service.findOrder(returnedOrder.id)
+        assertEquals(OrderStatus.CREATED, internalOrder.status)
+        assertEquals(0, service.findStatusHistories(returnedOrder.id).size)
+    }
+
