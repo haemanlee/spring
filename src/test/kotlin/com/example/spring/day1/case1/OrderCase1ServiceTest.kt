@@ -4,10 +4,13 @@ import java.math.BigDecimal
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 class OrderCase1ServiceTest {
 
@@ -23,7 +26,6 @@ class OrderCase1ServiceTest {
         )
 
         val service = OrderCase1Service(catalog)
-
         val order = service.createOrder(memberId = 101L, items = listOf(1L to 2))
 
         catalog.updatePrice(productId = 1L, newPrice = BigDecimal("12000"))
@@ -61,7 +63,7 @@ class OrderCase1ServiceTest {
     }
 
     @Test
-    fun `사례1과 사례2 통합 - 상태 변경 시 이력이 누적된다`() {
+    fun `사례2 - 상태 변경 시 이력이 누적된다`() {
         val catalog = ProductCatalog()
         catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
 
@@ -86,7 +88,7 @@ class OrderCase1ServiceTest {
     }
 
     @Test
-    fun `사례1과 사례2 통합 - 동일 상태 변경 요청은 no-op 처리된다`() {
+    fun `사례3 - 동일 상태 변경 요청은 no-op 처리된다`() {
         val catalog = ProductCatalog()
         catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
 
@@ -100,9 +102,7 @@ class OrderCase1ServiceTest {
         assertEquals(OrderStatus.PAID, service.findOrder(order.id).status)
         assertEquals(1, service.findStatusHistories(order.id).size)
     }
-}
 
-    // [코드리뷰 반영] 외부에서 반환받은 Order를 수정해도 내부 저장 상태/이력은 훼손되지 않아야 한다.
     @Test
     fun `반환된 Order 수정은 내부 상태에 영향을 주지 않는다`() {
         val catalog = ProductCatalog()
@@ -111,12 +111,48 @@ class OrderCase1ServiceTest {
         val service = OrderCase1Service(catalog)
         val returnedOrder = service.createOrder(memberId = 101L, items = listOf(1L to 1))
 
-        // 외부에서 상태를 임의 변경(잘못된 사용)
         returnedOrder.status = OrderStatus.CANCELED
 
-        // 내부 저장 상태는 보호되어야 함
         val internalOrder = service.findOrder(returnedOrder.id)
         assertEquals(OrderStatus.CREATED, internalOrder.status)
         assertEquals(0, service.findStatusHistories(returnedOrder.id).size)
     }
 
+    @Test
+    fun `주문 수량은 1 이상이어야 한다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        val service = OrderCase1Service(catalog)
+
+        assertFailsWith<IllegalArgumentException> {
+            service.createOrder(memberId = 101L, items = listOf(1L to 0))
+        }
+    }
+
+    @Test
+    fun `상태 이력은 동시 변경과 조회에서도 예외 없이 안전하게 조회된다`() {
+        val catalog = ProductCatalog()
+        catalog.save(Product(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        val service = OrderCase1Service(catalog)
+        val order = service.createOrder(memberId = 101L, items = listOf(1L to 1))
+
+        val errorRef = AtomicReference<Throwable?>(null)
+        val executor = Executors.newFixedThreadPool(8)
+        val statuses = listOf(OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.CANCELED)
+
+        repeat(300) { index ->
+            executor.submit {
+                runCatching {
+                    service.changeStatus(order.id, statuses[index % statuses.size], actorId = index.toLong())
+                    service.findStatusHistories(order.id)
+                }.onFailure { errorRef.compareAndSet(null, it) }
+            }
+        }
+
+        executor.shutdown()
+        val finished = executor.awaitTermination(5, TimeUnit.SECONDS)
+
+        assertTrue(finished)
+        assertNull(errorRef.get())
+    }
+}

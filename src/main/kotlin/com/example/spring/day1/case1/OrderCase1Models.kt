@@ -2,6 +2,8 @@ package com.example.spring.day1.case1
 
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 
 enum class OrderStatus {
@@ -14,8 +16,8 @@ enum class OrderStatus {
 
 data class Product(
     val id: Long,
-    var name: String,
-    var unitPrice: BigDecimal,
+    val name: String,
+    val unitPrice: BigDecimal,
 )
 
 data class OrderItem(
@@ -42,7 +44,7 @@ data class OrderStatusHistory(
 )
 
 class ProductCatalog {
-    private val products = linkedMapOf<Long, Product>()
+    private val products = ConcurrentHashMap<Long, Product>()
 
     fun save(product: Product) {
         products[product.id] = product
@@ -62,17 +64,18 @@ class OrderCase1Service(
     private val productCatalog: ProductCatalog,
 ) {
     private val orderSequence = AtomicLong(0)
-    // [코드리뷰 반영] 내부 상태 보호를 위해 외부에는 방어적 복사본(Order copy)만 반환
-    private fun toExternalOrder(order: Order): Order {
-        return order.copy(items = order.items.toList())
-    }
+    private val orders = ConcurrentHashMap<Long, Order>()
+    private val statusHistories = CopyOnWriteArrayList<OrderStatusHistory>()
 
-        return toExternalOrder(order)
-        val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
-        return toExternalOrder(order)
+    // 내부 저장 상태를 외부 변경으로부터 보호하기 위한 방어적 복사.
+    private fun toExternalOrder(order: Order): Order = order.copy(items = order.items.toList())
 
     fun createOrder(memberId: Long, items: List<Pair<Long, Int>>): Order {
+        require(items.isNotEmpty()) { "order items must not be empty" }
+
         val orderItems = items.map { (productId, quantity) ->
+            require(quantity > 0) { "quantity must be positive: $quantity" }
+
             val product = productCatalog.findById(productId)
             OrderItem(
                 productId = product.id,
@@ -90,8 +93,9 @@ class OrderCase1Service(
             status = OrderStatus.CREATED,
             items = orderItems,
         )
+
         orders[order.id] = order
-        return order
+        return toExternalOrder(order)
     }
 
     fun calculateTotalAmount(order: Order): BigDecimal {
@@ -100,6 +104,8 @@ class OrderCase1Service(
         }
     }
 
+    // 사례 C: 동일 상태 변경 요청은 no-op(false) 처리하고 이력을 남기지 않는다.
+    @Synchronized
     fun changeStatus(orderId: Long, newStatus: OrderStatus, actorId: Long?): Boolean {
         val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
         val oldStatus = order.status
@@ -119,12 +125,14 @@ class OrderCase1Service(
     }
 
     fun findOrder(orderId: Long): Order {
-        return orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+        val order = orders[orderId] ?: throw IllegalArgumentException("order not found: $orderId")
+        return toExternalOrder(order)
     }
 
     fun findStatusHistories(orderId: Long): List<OrderStatusHistory> {
         return statusHistories
             .filter { it.orderId == orderId }
             .sortedBy { it.createdAt }
+            .toList()
     }
 }
