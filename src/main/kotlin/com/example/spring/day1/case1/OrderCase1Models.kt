@@ -1,6 +1,7 @@
 package com.example.spring.day1.case1
 
 import java.math.BigDecimal
+import java.util.concurrent.atomic.AtomicLong
 
 enum class OrderStatus {
     CREATED,
@@ -51,7 +52,7 @@ class ProductCatalog {
 class OrderCase1Service(
     private val productCatalog: ProductCatalog,
 ) {
-    private var orderSequence: Long = 0
+    private val orderSequence = AtomicLong(0)
 
     fun createOrder(memberId: Long, items: List<Pair<Long, Int>>): Order {
         val orderItems = items.map { (productId, quantity) ->
@@ -64,10 +65,10 @@ class OrderCase1Service(
             )
         }
 
-        orderSequence += 1
+        val nextOrderSequence = orderSequence.incrementAndGet()
         return Order(
-            id = orderSequence,
-            orderNo = "ORD-${orderSequence.toString().padStart(8, '0')}",
+            id = nextOrderSequence,
+            orderNo = "ORD-${nextOrderSequence.toString().padStart(8, '0')}",
             memberId = memberId,
             status = OrderStatus.CREATED,
             items = orderItems,
