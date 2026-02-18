@@ -2,13 +2,16 @@ package com.example.spring.day2.order.application
 
 import com.example.spring.day2.order.domain.CatalogProduct
 import com.example.spring.day2.order.domain.OrderStatus
+import com.example.spring.day2.order.domain.OrderStatusHistory
 import com.example.spring.day2.order.infra.InMemoryOrderRepository
 import com.example.spring.day2.order.infra.InMemoryOrderStatusHistoryRepository
 import com.example.spring.day2.order.infra.InMemoryProductCatalogRepository
+import com.example.spring.day2.order.infra.OrderStatusHistoryRepository
 import java.math.BigDecimal
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ChangeOrderStatusServiceTest {
@@ -72,5 +75,37 @@ class ChangeOrderStatusServiceTest {
         assertEquals(1, histories.size)
         assertEquals(OrderStatus.CREATED, histories[0].fromStatus)
         assertEquals(OrderStatus.PAID, histories[0].toStatus)
+    }
+
+    @Test
+    fun `2-2 이력 저장 실패 시 주문 상태는 원복되어 원자성이 유지된다`() {
+        val catalogRepository = InMemoryProductCatalogRepository().apply {
+            save(CatalogProduct(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        }
+        val orderRepository = InMemoryOrderRepository()
+        val createOrderService = CreateOrderService(catalogRepository, orderRepository)
+        val service = ChangeOrderStatusService(orderRepository, FailingOrderStatusHistoryRepository())
+
+        val order = createOrderService.create(
+            CreateOrderCommand(
+                memberId = 101L,
+                items = listOf(CreateOrderItemCommand(productId = 1L, quantity = 1)),
+            )
+        )
+
+        assertFailsWith<IllegalStateException> {
+            service.change(ChangeOrderStatusCommand(orderId = order.orderId, targetStatus = OrderStatus.PAID))
+        }
+
+        val savedOrder = requireNotNull(orderRepository.findById(order.orderId))
+        assertEquals(OrderStatus.CREATED, savedOrder.status)
+    }
+
+    private class FailingOrderStatusHistoryRepository : OrderStatusHistoryRepository {
+        override fun save(history: OrderStatusHistory) {
+            throw IllegalStateException("history save failed")
+        }
+
+        override fun findByOrderId(orderId: Long): List<OrderStatusHistory> = emptyList()
     }
 }

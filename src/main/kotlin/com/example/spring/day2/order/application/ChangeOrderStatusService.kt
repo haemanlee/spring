@@ -38,13 +38,19 @@ class ChangeOrderStatusService(
             val changedOrder = order.copy(status = command.targetStatus)
             orderRepository.save(changedOrder)
 
-            orderStatusHistoryRepository.save(
-                OrderStatusHistory(
-                    orderId = order.id,
-                    fromStatus = order.status,
-                    toStatus = command.targetStatus,
+            try {
+                orderStatusHistoryRepository.save(
+                    OrderStatusHistory(
+                        orderId = order.id,
+                        fromStatus = order.status,
+                        toStatus = command.targetStatus,
+                    )
                 )
-            )
+            } catch (exception: Exception) {
+                // 상태 저장 이후 이력 저장이 실패하면 상태를 원복해 둘의 정합성을 맞춘다.
+                orderRepository.save(order)
+                throw exception
+            }
 
             return ChangeOrderStatusResult(
                 orderId = changedOrder.id,
