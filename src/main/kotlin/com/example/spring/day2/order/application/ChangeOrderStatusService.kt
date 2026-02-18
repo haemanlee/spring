@@ -20,13 +20,13 @@ data class ChangeOrderStatusResult(
 class ChangeOrderStatusService(
     private val orderRepository: OrderRepository,
     private val orderStatusHistoryRepository: OrderStatusHistoryRepository,
+    private val orderAuditService: OrderAuditService? = null,
 ) {
     fun change(command: ChangeOrderStatusCommand): ChangeOrderStatusResult {
         val order = orderRepository.findByIdForUpdate(command.orderId)
             ?: throw IllegalArgumentException("order not found: ${command.orderId}")
 
         try {
-            // 동일 상태 재요청은 멱등하게 no-op 처리한다.
             if (order.status == command.targetStatus) {
                 return ChangeOrderStatusResult(
                     orderId = order.id,
@@ -47,9 +47,21 @@ class ChangeOrderStatusService(
                     )
                 )
             } catch (exception: Exception) {
-                // 상태 저장 이후 이력 저장이 실패하면 상태를 원복해 둘의 정합성을 맞춘다.
                 orderRepository.save(order)
+                runCatching {
+                    orderAuditService?.recordStatusChangeFailure(
+                        orderId = order.id,
+                        reason = "status change failed: ${exception.message}",
+                    )
+                }
                 throw exception
+            }
+
+            runCatching {
+                orderAuditService?.recordStatusChangeSuccess(
+                    orderId = changedOrder.id,
+                    newStatus = changedOrder.status.name,
+                )
             }
 
             return ChangeOrderStatusResult(
@@ -58,7 +70,6 @@ class ChangeOrderStatusService(
                 currentStatus = changedOrder.status,
             )
         } finally {
-            // In-memory 잠금 구현의 해제를 위해 실제 구현체를 사용할 때만 unlock을 수행한다.
             if (orderRepository is InMemoryOrderRepository) {
                 orderRepository.unlock(command.orderId)
             }

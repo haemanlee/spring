@@ -43,3 +43,14 @@ data class OrderStatusHistory(
     val fromStatus: OrderStatus,
     val toStatus: OrderStatus,
 )
+
+enum class OrderAuditType {
+    STATUS_CHANGE_SUCCEEDED,
+    STATUS_CHANGE_FAILED,
+}
+
+data class OrderAuditLog(
+    val orderId: Long,
+    val type: OrderAuditType,
+    val message: String,
+)

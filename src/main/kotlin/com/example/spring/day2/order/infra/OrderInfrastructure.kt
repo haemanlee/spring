@@ -1,6 +1,7 @@
 package com.example.spring.day2.order.infra
 
 import com.example.spring.day2.order.domain.CatalogProduct
+import com.example.spring.day2.order.domain.OrderAuditLog
 import com.example.spring.day2.order.domain.Order
 import com.example.spring.day2.order.domain.OrderStatusHistory
 import java.math.BigDecimal
@@ -76,6 +77,29 @@ class InMemoryOrderRepository : OrderRepository {
 interface OrderStatusHistoryRepository {
     fun save(history: OrderStatusHistory)
     fun findByOrderId(orderId: Long): List<OrderStatusHistory>
+}
+
+interface OrderAuditLogRepository {
+    fun save(log: OrderAuditLog)
+    fun findByOrderId(orderId: Long): List<OrderAuditLog>
+}
+
+class InMemoryOrderAuditLogRepository : OrderAuditLogRepository {
+    private val auditLogs = ConcurrentHashMap<Long, MutableList<OrderAuditLog>>()
+    private val lock = ReentrantLock()
+
+    override fun save(log: OrderAuditLog) {
+        lock.withLock {
+            val logs = auditLogs.computeIfAbsent(log.orderId) { mutableListOf() }
+            logs.add(log)
+        }
+    }
+
+    override fun findByOrderId(orderId: Long): List<OrderAuditLog> {
+        return lock.withLock {
+            auditLogs[orderId]?.toList().orEmpty()
+        }
+    }
 }
 
 class InMemoryOrderStatusHistoryRepository : OrderStatusHistoryRepository {

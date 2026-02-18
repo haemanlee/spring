@@ -1,11 +1,14 @@
 package com.example.spring.day2.order.application
 
 import com.example.spring.day2.order.domain.CatalogProduct
+import com.example.spring.day2.order.domain.OrderAuditLog
 import com.example.spring.day2.order.domain.OrderStatus
 import com.example.spring.day2.order.domain.OrderStatusHistory
+import com.example.spring.day2.order.infra.InMemoryOrderAuditLogRepository
 import com.example.spring.day2.order.infra.InMemoryOrderRepository
 import com.example.spring.day2.order.infra.InMemoryOrderStatusHistoryRepository
 import com.example.spring.day2.order.infra.InMemoryProductCatalogRepository
+import com.example.spring.day2.order.infra.OrderAuditLogRepository
 import com.example.spring.day2.order.infra.OrderStatusHistoryRepository
 import java.math.BigDecimal
 import kotlin.test.Test
@@ -101,11 +104,79 @@ class ChangeOrderStatusServiceTest {
         assertEquals(OrderStatus.CREATED, savedOrder.status)
     }
 
+    @Test
+    fun `2-3 메인 상태 변경 실패여도 감사 로그는 기록된다`() {
+        val catalogRepository = InMemoryProductCatalogRepository().apply {
+            save(CatalogProduct(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        }
+        val orderRepository = InMemoryOrderRepository()
+        val createOrderService = CreateOrderService(catalogRepository, orderRepository)
+        val auditLogRepository = InMemoryOrderAuditLogRepository()
+        val auditService = OrderAuditService(auditLogRepository)
+        val service = ChangeOrderStatusService(
+            orderRepository = orderRepository,
+            orderStatusHistoryRepository = FailingOrderStatusHistoryRepository(),
+            orderAuditService = auditService,
+        )
+
+        val order = createOrderService.create(
+            CreateOrderCommand(
+                memberId = 101L,
+                items = listOf(CreateOrderItemCommand(productId = 1L, quantity = 1)),
+            )
+        )
+
+        assertFailsWith<IllegalStateException> {
+            service.change(ChangeOrderStatusCommand(orderId = order.orderId, targetStatus = OrderStatus.PAID))
+        }
+
+        val auditLogs = auditLogRepository.findByOrderId(order.orderId)
+        assertEquals(1, auditLogs.size)
+        assertTrue(auditLogs.first().message.contains("status change failed"))
+    }
+
+    @Test
+    fun `2-3 감사 로그 저장 실패가 발생해도 메인 상태 변경은 성공한다`() {
+        val catalogRepository = InMemoryProductCatalogRepository().apply {
+            save(CatalogProduct(id = 1L, name = "텀블러", unitPrice = BigDecimal("10000")))
+        }
+        val orderRepository = InMemoryOrderRepository()
+        val createOrderService = CreateOrderService(catalogRepository, orderRepository)
+        val historyRepository = InMemoryOrderStatusHistoryRepository()
+        val auditService = OrderAuditService(FailingOrderAuditLogRepository())
+        val service = ChangeOrderStatusService(
+            orderRepository = orderRepository,
+            orderStatusHistoryRepository = historyRepository,
+            orderAuditService = auditService,
+        )
+
+        val order = createOrderService.create(
+            CreateOrderCommand(
+                memberId = 101L,
+                items = listOf(CreateOrderItemCommand(productId = 1L, quantity = 1)),
+            )
+        )
+
+        val result = service.change(ChangeOrderStatusCommand(orderId = order.orderId, targetStatus = OrderStatus.PAID))
+
+        assertTrue(result.changed)
+        assertEquals(OrderStatus.PAID, result.currentStatus)
+        assertEquals(1, historyRepository.findByOrderId(order.orderId).size)
+    }
+
     private class FailingOrderStatusHistoryRepository : OrderStatusHistoryRepository {
         override fun save(history: OrderStatusHistory) {
             throw IllegalStateException("history save failed")
         }
 
         override fun findByOrderId(orderId: Long): List<OrderStatusHistory> = emptyList()
+    }
+
+    private class FailingOrderAuditLogRepository : OrderAuditLogRepository {
+        override fun save(log: OrderAuditLog) {
+            throw IllegalStateException("audit log save failed")
+        }
+
+        override fun findByOrderId(orderId: Long): List<OrderAuditLog> = emptyList()
     }
 }
