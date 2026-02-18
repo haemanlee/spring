@@ -26,6 +26,8 @@ class ChangeOrderStatusService(
         val order = orderRepository.findByIdForUpdate(command.orderId)
             ?: throw IllegalArgumentException("order not found: ${command.orderId}")
 
+        var statusUpdated = false
+
         try {
             if (order.status == command.targetStatus) {
                 return ChangeOrderStatusResult(
@@ -37,25 +39,15 @@ class ChangeOrderStatusService(
 
             val changedOrder = order.copy(status = command.targetStatus)
             orderRepository.save(changedOrder)
+            statusUpdated = true
 
-            try {
-                orderStatusHistoryRepository.save(
-                    OrderStatusHistory(
-                        orderId = order.id,
-                        fromStatus = order.status,
-                        toStatus = command.targetStatus,
-                    )
+            orderStatusHistoryRepository.save(
+                OrderStatusHistory(
+                    orderId = order.id,
+                    fromStatus = order.status,
+                    toStatus = command.targetStatus,
                 )
-            } catch (exception: Exception) {
-                orderRepository.save(order)
-                runCatching {
-                    orderAuditService?.recordStatusChangeFailure(
-                        orderId = order.id,
-                        reason = "status change failed: ${exception.message}",
-                    )
-                }
-                throw exception
-            }
+            )
 
             runCatching {
                 orderAuditService?.recordStatusChangeSuccess(
@@ -69,6 +61,19 @@ class ChangeOrderStatusService(
                 changed = true,
                 currentStatus = changedOrder.status,
             )
+        } catch (exception: Exception) {
+            if (statusUpdated) {
+                runCatching { orderRepository.save(order) }
+            }
+
+            runCatching {
+                orderAuditService?.recordStatusChangeFailure(
+                    orderId = order.id,
+                    reason = "status change failed: ${exception.message}",
+                )
+            }
+
+            throw exception
         } finally {
             if (orderRepository is InMemoryOrderRepository) {
                 orderRepository.unlock(command.orderId)

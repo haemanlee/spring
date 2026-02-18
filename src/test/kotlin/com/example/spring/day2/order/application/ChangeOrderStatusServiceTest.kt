@@ -1,7 +1,9 @@
 package com.example.spring.day2.order.application
 
 import com.example.spring.day2.order.domain.CatalogProduct
+import com.example.spring.day2.order.domain.Order
 import com.example.spring.day2.order.domain.OrderAuditLog
+import com.example.spring.day2.order.domain.OrderItem
 import com.example.spring.day2.order.domain.OrderStatus
 import com.example.spring.day2.order.domain.OrderStatusHistory
 import com.example.spring.day2.order.infra.InMemoryOrderAuditLogRepository
@@ -9,6 +11,7 @@ import com.example.spring.day2.order.infra.InMemoryOrderRepository
 import com.example.spring.day2.order.infra.InMemoryOrderStatusHistoryRepository
 import com.example.spring.day2.order.infra.InMemoryProductCatalogRepository
 import com.example.spring.day2.order.infra.OrderAuditLogRepository
+import com.example.spring.day2.order.infra.OrderRepository
 import com.example.spring.day2.order.infra.OrderStatusHistoryRepository
 import java.math.BigDecimal
 import kotlin.test.Test
@@ -164,6 +167,41 @@ class ChangeOrderStatusServiceTest {
         assertEquals(1, historyRepository.findByOrderId(order.orderId).size)
     }
 
+    @Test
+    fun `2-3 주문 상태 저장이 실패해도 감사 로그는 기록된다`() {
+        val orderRepository = FailingStatusUpdateOrderRepository(
+            initialOrder = Order(
+                id = 1L,
+                orderNo = "ORD-00000001",
+                memberId = 101L,
+                status = OrderStatus.CREATED,
+                items = listOf(
+                    OrderItem(
+                        productId = 1L,
+                        productNameSnapshot = "텀블러",
+                        unitPriceSnapshot = BigDecimal("10000"),
+                        quantity = 1,
+                    )
+                ),
+            )
+        )
+        val auditLogRepository = InMemoryOrderAuditLogRepository()
+        val auditService = OrderAuditService(auditLogRepository)
+        val service = ChangeOrderStatusService(
+            orderRepository = orderRepository,
+            orderStatusHistoryRepository = InMemoryOrderStatusHistoryRepository(),
+            orderAuditService = auditService,
+        )
+
+        assertFailsWith<IllegalStateException> {
+            service.change(ChangeOrderStatusCommand(orderId = 1L, targetStatus = OrderStatus.PAID))
+        }
+
+        val auditLogs = auditLogRepository.findByOrderId(1L)
+        assertEquals(1, auditLogs.size)
+        assertTrue(auditLogs.first().message.contains("order save failed"))
+    }
+
     private class FailingOrderStatusHistoryRepository : OrderStatusHistoryRepository {
         override fun save(history: OrderStatusHistory) {
             throw IllegalStateException("history save failed")
@@ -179,4 +217,22 @@ class ChangeOrderStatusServiceTest {
 
         override fun findByOrderId(orderId: Long): List<OrderAuditLog> = emptyList()
     }
+
+    private class FailingStatusUpdateOrderRepository(
+        private var currentOrder: Order,
+    ) : OrderRepository {
+        override fun nextId(): Long = currentOrder.id
+
+        override fun save(order: Order) {
+            if (order.status != currentOrder.status) {
+                throw IllegalStateException("order save failed")
+            }
+            currentOrder = order
+        }
+
+        override fun findById(orderId: Long): Order? = currentOrder.takeIf { it.id == orderId }
+
+        override fun findByIdForUpdate(orderId: Long): Order? = currentOrder.takeIf { it.id == orderId }
+    }
+
 }
