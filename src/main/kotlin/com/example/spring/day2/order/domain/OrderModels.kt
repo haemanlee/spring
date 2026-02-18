@@ -30,9 +30,16 @@ data class Order(
     val status: OrderStatus,
     val items: List<OrderItem>,
 ) {
+    // 주문 총액은 주문 시점 스냅샷 가격을 기준으로 계산한다.
     fun totalAmount(): BigDecimal {
         return items.fold(BigDecimal.ZERO) { acc, item ->
             acc + item.unitPriceSnapshot.multiply(BigDecimal.valueOf(item.quantity.toLong()))
         }
     }
 }
+
+data class OrderStatusHistory(
+    val orderId: Long,
+    val fromStatus: OrderStatus,
+    val toStatus: OrderStatus,
+)
