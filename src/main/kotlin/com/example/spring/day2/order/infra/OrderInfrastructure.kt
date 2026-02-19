@@ -36,6 +36,7 @@ interface OrderRepository {
     fun save(order: Order)
     fun findById(orderId: Long): Order?
     fun findByIdForUpdate(orderId: Long): Order?
+    fun findByMemberId(memberId: Long): List<Order>
 }
 
 class InMemoryOrderRepository : OrderRepository {
@@ -63,6 +64,15 @@ class InMemoryOrderRepository : OrderRepository {
             return null
         }
         return order.copy(items = order.items.toList())
+    }
+
+    override fun findByMemberId(memberId: Long): List<Order> {
+        return orders.values
+            .asSequence()
+            .filter { it.memberId == memberId }
+            .sortedByDescending { it.id }
+            .map { it.copy(items = it.items.toList()) }
+            .toList()
     }
 
     fun unlock(orderId: Long) {
