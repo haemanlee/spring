@@ -137,10 +137,29 @@ Day1에서 합의한 원칙을 **서비스 메서드 단위로 내려서 실행 
 - [x] 상태 변경 서비스: 잠금 조회 + 이력 INSERT-only 구현
 - [x] `REQUIRES_NEW` 적용 유즈케이스(감사 로그/알림 이력) 1개 이상 추가
 - [x] 동일 상태 변경 no-op 테스트 작성
-- [ ] 목록 조회 DTO 쿼리 작성 (`OrderSummary`)
-- [ ] 인덱스/유니크 키 DDL 점검
+- [x] 목록 조회 DTO 쿼리 작성 (`OrderSummary`)
+- [x] 인덱스/유니크 키 DDL 점검
 
 ---
+
+
+
+## 5-1) 인덱스/유니크 키 DDL 점검 메모
+
+```sql
+-- 주문번호 유니크 보장
+create unique index uk_orders_order_no on orders(order_no);
+
+-- 회원별 최근 주문 조회 최적화
+create index idx_orders_member_created_at on orders(member_id, created_at desc);
+
+-- 상태별 운영 조회(배송 대기/취소 집계 등)
+create index idx_orders_status on orders(status);
+
+-- 주문 상태 이력 타임라인 조회
+create index idx_order_status_histories_order_created_at
+    on order_status_histories(order_id, created_at desc);
+```
 
 ## 6) 실습 순서 제안
 1. 단위 테스트 먼저 작성
